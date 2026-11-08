@@ -1,0 +1,278 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: TA Time and Attendance - Cognito, API Gateway HTTP API, Python Lambda
+
+Parameters:
+  FrontendOrigin:
+    Type: String
+    Default: http://localhost:5173
+    Description: Exact browser origin for the TA frontend (no trailing slash).
+  StaffDbSecretArn:
+    Type: String
+    Description: Secrets Manager ARN containing host, username, password, database and optional port.
+  StaffDbSubnetIds:
+    Type: CommaDelimitedList
+    Description: Private subnet IDs with network access to the MySQL database.
+  StaffLambdaSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group for the staff Lambda; allow outbound TCP 3306 to the DB.
+  StaffCompanyId:
+    Type: Number
+    Default: 1
+    Description: Tenant/company ID used to scope staff records.
+  AttendanceDbSecretArn:
+    Type: String
+    Description: Secrets Manager ARN for attendance DB connection.
+  AttendanceDbSubnetIds:
+    Type: CommaDelimitedList
+    Description: Private subnet IDs with database connectivity.
+  AttendanceLambdaSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group for attendance Lambda.
+  AttendanceCompanyId:
+    Type: Number
+    Default: 1
+    Description: Company ID used to scope attendance.
+
+Globals:
+  Function:
+    Runtime: python3.13
+    MemorySize: 256
+    Timeout: 10
+    Architectures: [arm64]
+    Tracing: Active
+
+Resources:
+  TAUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: ta-users
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      MfaConfiguration: OPTIONAL
+      EnabledMfas: [SOFTWARE_TOKEN_MFA]
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          TemporaryPasswordValidityDays: 3
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+        - Name: name
+          AttributeDataType: String
+          Required: false
+          Mutable: true
+      UserPoolTags:
+        Application: TA
+
+  TAAdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: ADMIN
+      Description: TA administrators
+      Precedence: 1
+      UserPoolId: !Ref TAUserPool
+
+  TAUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: ta-react-spa
+      UserPoolId: !Ref TAUserPool
+      GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      AccessTokenValidity: 60
+      IdTokenValidity: 60
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: minutes
+        IdToken: minutes
+        RefreshToken: days
+      ReadAttributes: [email, email_verified, name]
+      WriteAttributes: [email, name]
+
+  TAHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+      CorsConfiguration:
+        AllowOrigins: [!Ref FrontendOrigin]
+        AllowHeaders: [Authorization, Content-Type, Accept]
+        AllowMethods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+        MaxAge: 3600
+      Auth:
+        DefaultAuthorizer: CognitoJwtAuthorizer
+        Authorizers:
+          CognitoJwtAuthorizer:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${TAUserPool}
+              audience: [!Ref TAUserPoolClient]
+
+  TAStaffFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ta-staff-api
+      CodeUri: staff/
+      Handler: app.handler
+      Runtime: python3.13
+      MemorySize: 256
+      Timeout: 15
+      Environment:
+        Variables:
+          STAFF_DB_SECRET_ARN: !Ref StaffDbSecretArn
+          STAFF_COMPANY_ID: !Ref StaffCompanyId
+          ATTENDANCE_IMAGE_BUCKET: ta-attendance-images
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref StaffLambdaSecurityGroupId
+        SubnetIds: !Ref StaffDbSubnetIds
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AWSLambdaVPCAccessExecutionRole
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref StaffDbSecretArn
+      Events:
+        StaffCollection:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TAHttpApi
+            Path: /staff
+            Method: GET
+        StaffCreate:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TAHttpApi
+            Path: /staff
+            Method: POST
+        StaffItem:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TAHttpApi
+            Path: /staff/{id}
+            Method: GET
+        StaffUpdate:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TAHttpApi
+            Path: /staff/{id}
+            Method: PUT
+        StaffDelete:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TAHttpApi
+            Path: /staff/{id}
+            Method: DELETE
+
+  TAAttendanceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ta-attendance-api
+      CodeUri: attendance/
+      Handler: app.handler
+      Runtime: python3.13
+      MemorySize: 256
+      Timeout: 20
+      Environment:
+        Variables:
+          ATTENDANCE_DB_SECRET_ARN: !Ref AttendanceDbSecretArn
+          ATTENDANCE_COMPANY_ID: !Ref AttendanceCompanyId
+          ATTENDANCE_IMAGE_BUCKET: ta-attendance-images
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref AttendanceLambdaSecurityGroupId
+        SubnetIds: !Ref AttendanceDbSubnetIds
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AWSLambdaVPCAccessExecutionRole
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref AttendanceDbSecretArn
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: arn:aws:s3:::time-attendance-274098674431-us-east-1-an/daily_captures/*
+      Events:
+        AttendanceToday:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TAHttpApi
+            Path: /attendance/today
+            Method: GET
+        AttendanceEmployee:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TAHttpApi
+            Path: /attendance/employees/{id}
+            Method: GET
+        AttendanceSheet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TAHttpApi
+            Path: /attendance/sheet
+            Method: GET
+
+  TAApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ta-api
+      CodeUri: src/
+      Handler: app.handler
+      Events:
+        ApiProxy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TAHttpApi
+            Path: /{proxy+}
+            Method: ANY
+        OptionsProxy:
+           Type: HttpApi
+           Properties:
+             ApiId: !Ref TAHttpApi
+             Path: /{proxy+}
+             Method: OPTIONS
+             Auth:
+              Authorizer: NONE
+      Policies:
+        - AWSLambdaBasicExecutionRole
+
+Outputs:
+  StaffLambdaName:
+    Description: Dedicated staff Lambda function
+    Value: !Ref TAStaffFunction
+  ApiBaseUrl:
+    Description: TA API base URL
+    Value: !Sub https://${TAHttpApi}.execute-api.${AWS::Region}.amazonaws.com
+  CognitoUserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref TAUserPool
+  CognitoUserPoolClientId:
+    Description: Public SPA app client ID (no client secret)
+    Value: !Ref TAUserPoolClient
+  CognitoIssuer:
+    Description: Cognito JWT issuer URL
+    Value: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${TAUserPool}
+
+  AttendanceLambdaName:
+    Description: Dedicated attendance Lambda function
+    Value: !Ref TAAttendanceFunction
