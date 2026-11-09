@@ -211,7 +211,7 @@ Resources:
             - Effect: Allow
               Action:
                 - s3:GetObject
-              Resource: !Ref AttendanceDbSecretArn
+              Resource: arn:aws:s3:::time-attendance-274098674431-us-east-1-an/daily_captures/*
       Events:
         AttendanceToday:
           Type: HttpApi
@@ -231,6 +231,18 @@ Resources:
             ApiId: !Ref TAHttpApi
             Path: /attendance/sheet
             Method: GET
+        AttendanceAddAdminPunch:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TAHttpApi
+            Path: /attendance/admin/punch
+            Method: POST
+        AttendanceUpdateAdminPunch:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TAHttpApi
+            Path: /attendance/admin/punch/{id}
+            Method: PUT
 
   TAApiFunction:
     Type: AWS::Serverless::Function
@@ -238,6 +250,9 @@ Resources:
       FunctionName: ta-api
       CodeUri: src/
       Handler: app.handler
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
       Events:
         ApiProxy:
           Type: HttpApi
@@ -255,6 +270,12 @@ Resources:
               Authorizer: NONE
       Policies:
         - AWSLambdaBasicExecutionRole
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:AdminGetUser
+              Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
 
 Outputs:
   StaffLambdaName:

@@ -21,10 +21,20 @@ export async function initializeAuth() {
   configureTokenStorage(localStorage.getItem('ta.remember') === 'true');
   try {
     const session = await fetchAuthSession();
-    if (!session.tokens?.accessToken) return null;
+    const accessToken = session.tokens?.accessToken?.toString();
+    if (!accessToken) {
+      return null;
+    }
+    
     const user = await getCurrentUser();
-    const profile = await apiRequest('/api/me');
-    return { user: { ...profile, username: profile.username || user.username } };
+    let profile = {};
+
+    try {
+      profile = await apiRequest('/api/me');
+    } catch (error) {
+      console.error('Unable to fetch user profile:', error);
+    }
+    return {accessToken, user: { ...profile, username: profile.username || user.username } };
   } catch {
     return null;
   }
@@ -36,6 +46,11 @@ export async function login({ username, password, role }, rememberMe = false) {
 
   localStorage.setItem('ta.remember', rememberMe ? 'true' : 'false');
   configureTokenStorage(rememberMe);
+  const existingSession = await fetchAuthSession();
+
+  if (existingSession.tokens?.accessToken) {
+    return finishAuthenticatedSession(role);
+  }
   const result = await cognitoSignIn({ username: username.trim(), password });
   if (!result.isSignedIn) {
     const step = result.nextStep?.signInStep;
