@@ -51,7 +51,7 @@ def handler(event, context):
             with conn.cursor() as cur:
                 if method=="GET" and path=="/attendance/today":
                     day=_date(q.get("date"),today)
-                    cur.execute("""SELECT u.id user_id,u.name,u.email,DATE_ADD(MIN(a.check_in_time), INTERVAL 330 MINUTE) first_check_in,DATE_ADD(MAX(a.check_in_time), INTERVAL 330 MINUTE) last_check_in,COUNT(a.id) check_in_count,CASE WHEN COUNT(a.id)>0 THEN 'Present' ELSE 'Absent' END status FROM ta_users u LEFT JOIN ta_attendance a ON a.users_id=u.id AND a.check_in_time >= %s AND a.check_in_time < DATE_ADD(%s,INTERVAL 1 DAY) WHERE u.company_id=%s AND u.active=0 GROUP BY u.id,u.name,u.email ORDER BY u.name""",(day,day,company))
+                    cur.execute("""SELECT u.id user_id,u.name,u.email,DATE_ADD(MIN(a.check_in_time), INTERVAL 330 MINUTE) first_check_in, CASE WHEN COUNT(a.id) > 1 THEN DATE_ADD(MAX(a.check_in_time), INTERVAL 330 MINUTE) ELSE '-' END as last_check_in,COUNT(a.id) check_in_count,CASE WHEN COUNT(a.id)>0 THEN 'Present' ELSE 'Absent' END status FROM ta_users u LEFT JOIN ta_attendance a ON a.users_id=u.id AND a.check_in_time >= %s AND a.check_in_time < DATE_ADD(%s,INTERVAL 1 DAY) WHERE u.company_id=%s AND u.active=0 GROUP BY u.id,u.name,u.email ORDER BY u.name""",(day,day,company))
                     return _response(200,{"date":day.isoformat(),"items":cur.fetchall()})
                 if method=="GET" and path.startswith("/attendance/employees/"):
                     uid=pp.get("id") or path.rsplit("/",1)[-1]

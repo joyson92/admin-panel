@@ -1,30 +1,20 @@
 # TA — Time & Attendance
 
-Admin-focused React frontend with Amazon Cognito authentication and a Java 21 / Spring Boot API foundation for AWS.
+React admin frontend with Amazon Cognito authentication and a Python 3.12 AWS Lambda API.
 
-## AWS deployment target
+Deployment target: us-east-1; private S3 + CloudFront frontend; API Gateway HTTP API; Cognito email sign-in; administrator-provisioned users in the ADMIN group. See `backend/README.md`.
 
-- Region: `us-east-1`
-- Deployment: AWS CloudShell + AWS SAM / CloudFormation
-- Backend: API Gateway HTTP API + Java 21 Lambda + Cognito `ADMIN` group
-- Frontend: private Amazon S3 bucket + Amazon CloudFront (OAC)
 
-Follow [`backend/README.md`](backend/README.md) for the console setup and deployment sequence.
+## Staff and attendance frontend integration
 
-## Frontend local development
+The Admin dashboard now loads Staff from `GET /staff` through `src/services/staffService.js`.
+The list displays only fields returned by the current `ta_users` schema: name, email, external ID, created date and active status. Add/Edit send `name`, `email`, `external_id` and `active` to the Staff Lambda. Deactivate calls `DELETE /staff/{id}`.
 
-```bash
-npm install
-cp .env.example .env.local
-# Fill in the Cognito and API values from the deployed CloudFormation stack.
-npm run dev
-```
+Attendance views use `src/services/attendanceService.js` and `src/components/attendance/AttendanceModule.jsx`:
+- Today's Attendance: `GET /attendance/today?date=YYYY-MM-DD`
+- Employee Attendance: first loads `GET /staff` for the employee selector, then `GET /attendance/employees/{id}?start_date=...&end_date=...`
+- Attendance Sheet: `GET /attendance/sheet?month=YYYY-MM`
 
-## Project structure
+All requests go through `src/services/apiClient.js`, which attaches the Cognito access token as a Bearer token. Set `VITE_API_BASE_URL` in `.env.production` to the API Gateway base URL (no trailing slash), then rebuild the frontend and upload the generated `dist/` files to S3. The backend stack must already have the matching routes deployed.
 
-- `src/` — React admin UI, Cognito authentication, and API client.
-- `backend/` — Spring Boot API, SAM template, Cognito ADMIN group, and CloudShell deployment script.
-
-## Scope note
-
-The current backend provides the authentication and API foundation. Staff and attendance persistence endpoints are not yet implemented; dashboard rows currently include sample data and must not be used as live records.
+Note: current `ta_users` schema does not store gender, phone, address, salary, department or designation as separate columns. The Staff list therefore intentionally shows only fields persisted by the existing table rather than displaying invented placeholder values.

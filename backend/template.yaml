@@ -211,7 +211,7 @@ Resources:
             - Effect: Allow
               Action:
                 - s3:GetObject
-              Resource: arn:aws:s3:::time-attendance-274098674431-us-east-1-an/daily_captures/*
+              Resource: !Ref AttendanceDbSecretArn
       Events:
         AttendanceToday:
           Type: HttpApi
