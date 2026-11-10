@@ -4,11 +4,9 @@ FRONTEND_ORIGIN="${1:-}"
 STAFF_DB_SECRET_ARN="${2:-}"
 STAFF_DB_SUBNET_IDS="${3:-}"
 STAFF_LAMBDA_SECURITY_GROUP_ID="${4:-}"
-STAFF_COMPANY_ID="${5:-1}"
-ATTENDANCE_DB_SECRET_ARN="${6:-$STAFF_DB_SECRET_ARN}"
-ATTENDANCE_DB_SUBNET_IDS="${7:-$STAFF_DB_SUBNET_IDS}"
-ATTENDANCE_LAMBDA_SECURITY_GROUP_ID="${8:-$STAFF_LAMBDA_SECURITY_GROUP_ID}"
-ATTENDANCE_COMPANY_ID="${9:-$STAFF_COMPANY_ID}"
+ATTENDANCE_DB_SECRET_ARN="${5:-$STAFF_DB_SECRET_ARN}"
+ATTENDANCE_DB_SUBNET_IDS="${6:-$STAFF_DB_SUBNET_IDS}"
+ATTENDANCE_LAMBDA_SECURITY_GROUP_ID="${7:-$STAFF_LAMBDA_SECURITY_GROUP_ID}"
 if [[ -z "$FRONTEND_ORIGIN" || -z "$STAFF_DB_SECRET_ARN" || -z "$STAFF_DB_SUBNET_IDS" || -z "$STAFF_LAMBDA_SECURITY_GROUP_ID" ]]; then
  echo "Usage: $0 <frontend-origin> <staff-secret-arn> <staff-subnets> <staff-sg> [company-id] [attendance-secret-arn] [attendance-subnets] [attendance-sg] [attendance-company-id]"; exit 1
 fi
@@ -16,5 +14,5 @@ export AWS_DEFAULT_REGION=us-east-1
 aws sts get-caller-identity >/dev/null
 sam validate --template-file template.yaml
 sam build --template-file template.yaml
-sam deploy --template-file .aws-sam/build/template.yaml --stack-name ta-time-attendance --region us-east-1 --resolve-s3 --capabilities CAPABILITY_IAM --parameter-overrides "FrontendOrigin=$FRONTEND_ORIGIN" "StaffDbSecretArn=$STAFF_DB_SECRET_ARN" "StaffDbSubnetIds=$STAFF_DB_SUBNET_IDS" "StaffLambdaSecurityGroupId=$STAFF_LAMBDA_SECURITY_GROUP_ID" "StaffCompanyId=$STAFF_COMPANY_ID" "AttendanceDbSecretArn=$ATTENDANCE_DB_SECRET_ARN" "AttendanceDbSubnetIds=$ATTENDANCE_DB_SUBNET_IDS" "AttendanceLambdaSecurityGroupId=$ATTENDANCE_LAMBDA_SECURITY_GROUP_ID" "AttendanceCompanyId=$ATTENDANCE_COMPANY_ID" --no-confirm-changeset
+sam deploy --template-file .aws-sam/build/template.yaml --stack-name ta-time-attendance --region us-east-1 --resolve-s3 --capabilities CAPABILITY_IAM --parameter-overrides "FrontendOrigin=$FRONTEND_ORIGIN" "StaffDbSecretArn=$STAFF_DB_SECRET_ARN" "StaffDbSubnetIds=$STAFF_DB_SUBNET_IDS" "StaffLambdaSecurityGroupId=$STAFF_LAMBDA_SECURITY_GROUP_ID" "AttendanceDbSecretArn=$ATTENDANCE_DB_SECRET_ARN" "AttendanceDbSubnetIds=$ATTENDANCE_DB_SUBNET_IDS" "AttendanceLambdaSecurityGroupId=$ATTENDANCE_LAMBDA_SECURITY_GROUP_ID" --no-confirm-changeset
 aws cloudformation describe-stacks --stack-name ta-time-attendance --region us-east-1 --query 'Stacks[0].Outputs' --output table

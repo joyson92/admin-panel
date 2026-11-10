@@ -82,7 +82,7 @@ def handler(event, context):
                 if method == 'GET' and not staff_id:
                     cur.execute(
                         'SELECT id, name, email, face_id, created_at, updated_at, active, external_id, company_id '
-                        'FROM ta_users WHERE company_id=%s AND active=1 ORDER BY id DESC',
+                        'FROM ta_users WHERE company_id=%s AND active=0 ORDER BY id DESC',
                         (company_id,)
                     )
                     return response(200, {'items': cur.fetchall()})
@@ -130,7 +130,7 @@ def handler(event, context):
                     return response(200, cur.fetchone())
 
                 if method == 'DELETE' and staff_id:
-                    cur.execute('UPDATE ta_users SET active=0, updated_at=CURRENT_TIMESTAMP WHERE id=%s AND company_id=%s AND active=1', (staff_id, company_id))
+                    cur.execute('UPDATE ta_users SET active=1, updated_at=CURRENT_TIMESTAMP WHERE id=%s AND company_id=%s AND active=0', (staff_id, company_id))
                     conn.commit()
                     if cur.rowcount == 0:
                         return response(404, {'message': 'Active staff member not found'})
