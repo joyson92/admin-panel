@@ -16,10 +16,6 @@ Parameters:
   StaffLambdaSecurityGroupId:
     Type: AWS::EC2::SecurityGroup::Id
     Description: Security group for the staff Lambda; allow outbound TCP 3306 to the DB.
-  StaffCompanyId:
-    Type: Number
-    Default: 1
-    Description: Tenant/company ID used to scope staff records.
   AttendanceDbSecretArn:
     Type: String
     Description: Secrets Manager ARN for attendance DB connection.
@@ -29,51 +25,75 @@ Parameters:
   AttendanceLambdaSecurityGroupId:
     Type: AWS::EC2::SecurityGroup::Id
     Description: Security group for attendance Lambda.
-  AttendanceCompanyId:
-    Type: Number
-    Default: 1
-    Description: Company ID used to scope attendance.
 
 Globals:
   Function:
     Runtime: python3.13
-    MemorySize: 256
-    Timeout: 10
+    MemorySize: 128
+    Timeout: 5
     Architectures: [arm64]
     Tracing: Active
 
 Resources:
   TAUserPool:
     Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
-      UserPoolName: ta-users
+      UserPoolName: ta-users-v2
+
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: true
-      UsernameAttributes: [email]
-      AutoVerifiedAttributes: [email]
+
+      UsernameAttributes:
+        - email
+
+      AutoVerifiedAttributes:
+        - email
+
       MfaConfiguration: OPTIONAL
-      EnabledMfas: [SOFTWARE_TOKEN_MFA]
+      EnabledMfas:
+        - SOFTWARE_TOKEN_MFA
+
       AccountRecoverySetting:
         RecoveryMechanisms:
           - Name: verified_email
             Priority: 1
+
       Policies:
         PasswordPolicy:
-          MinimumLength: 12
+          MinimumLength: 6
           RequireLowercase: true
           RequireUppercase: true
           RequireNumbers: true
           RequireSymbols: true
           TemporaryPasswordValidityDays: 3
+
       Schema:
         - Name: email
           AttributeDataType: String
           Required: true
           Mutable: true
+
         - Name: name
           AttributeDataType: String
           Required: false
           Mutable: true
+
+        - Name: company_id
+          AttributeDataType: Number
+          Required: false
+          Mutable: true
+          NumberAttributeConstraints:
+            MinValue: "1"
+
+        - Name: branch_id
+          AttributeDataType: Number
+          Required: false
+          Mutable: true
+          NumberAttributeConstraints:
+            MinValue: "1"
+
       UserPoolTags:
         Application: TA
 
@@ -101,7 +121,7 @@ Resources:
         AccessToken: minutes
         IdToken: minutes
         RefreshToken: days
-      ReadAttributes: [email, email_verified, name]
+      ReadAttributes: [email, email_verified, name, custom:company_id, custom:branch_id]
       WriteAttributes: [email, name]
 
   TAHttpApi:
@@ -129,17 +149,16 @@ Resources:
       CodeUri: staff/
       Handler: app.handler
       Runtime: python3.13
-      MemorySize: 256
-      Timeout: 15
+      MemorySize: 128
+      Timeout: 5
       Environment:
         Variables:
           STAFF_DB_SECRET_ARN: !Ref StaffDbSecretArn
-          STAFF_COMPANY_ID: !Ref StaffCompanyId
-          ATTENDANCE_IMAGE_BUCKET: ta-attendance-images
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref StaffLambdaSecurityGroupId
-        SubnetIds: !Ref StaffDbSubnetIds
+          ATTENDANCE_IMAGE_BUCKET: time-attendance-274098674431-us-east-1-an
+      # VpcConfig:
+      #   SecurityGroupIds:
+      #     - !Ref StaffLambdaSecurityGroupId
+      #   SubnetIds: !Ref StaffDbSubnetIds
       Policies:
         - AWSLambdaBasicExecutionRole
         - AWSLambdaVPCAccessExecutionRole
@@ -187,17 +206,16 @@ Resources:
       CodeUri: attendance/
       Handler: app.handler
       Runtime: python3.13
-      MemorySize: 256
-      Timeout: 20
+      MemorySize: 128
+      Timeout: 5
       Environment:
         Variables:
           ATTENDANCE_DB_SECRET_ARN: !Ref AttendanceDbSecretArn
-          ATTENDANCE_COMPANY_ID: !Ref AttendanceCompanyId
-          ATTENDANCE_IMAGE_BUCKET: ta-attendance-images
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref AttendanceLambdaSecurityGroupId
-        SubnetIds: !Ref AttendanceDbSubnetIds
+          ATTENDANCE_IMAGE_BUCKET: time-attendance-274098674431-us-east-1-an
+      # VpcConfig:
+      #   SecurityGroupIds:
+      #     - !Ref AttendanceLambdaSecurityGroupId
+      #   SubnetIds: !Ref AttendanceDbSubnetIds
       Policies:
         - AWSLambdaBasicExecutionRole
         - AWSLambdaVPCAccessExecutionRole
@@ -252,7 +270,7 @@ Resources:
       Handler: app.handler
       Environment:
         Variables:
-          COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
+          COGNITO_USER_POOL_ID: !Ref TAUserPool
       Events:
         ApiProxy:
           Type: HttpApi
@@ -275,7 +293,7 @@ Resources:
             - Effect: Allow
               Action:
                 - cognito-idp:AdminGetUser
-              Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
+              Resource: !GetAtt TAUserPool.Arn
 
 Outputs:
   StaffLambdaName:

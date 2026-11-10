@@ -38,7 +38,7 @@ function StatusIcon({ status }) {
 }
 
 function DashboardPage({ onLogout, user }) {
-  const currentUserName = user?.fullName || user?.username || 'Ella Jones';
+  const currentUserName =  user?.fname || 'TA User';
   const currentUserInitials = currentUserName.split(/[\\s._-]+/).filter(Boolean).slice(0, 2).map(part => part[0].toUpperCase()).join('') || 'EJ';
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [year, setYear] = useState('2024');
