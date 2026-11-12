@@ -11,9 +11,9 @@ export default function BrandPanel() {
           <span>TA</span>
         </div>
         <div className="brand-copy">
-          <p className="brand-eyebrow">Healthcare operations platform</p>
+          <p className="brand-eyebrow">Daily operations platform</p>
           <h1>Time & Attendance</h1>
-          <p>Real-time hospital operations, interactive patient journey tracking, and modern vitals telemetry at your fingertips.</p>
+          {/* <p>Real-time hospital operations, interactive patient journey tracking, and modern vitals telemetry at your fingertips.</p> */}
         </div>
         <div className="brand-metrics">
           <div><strong>100%</strong><span>SAAS READY</span></div>

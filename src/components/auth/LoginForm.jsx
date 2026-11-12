@@ -110,7 +110,7 @@ export default function LoginForm({ onLogin, onCompleteSignInChallenge }) {
       <StatusMessage type="success">{notice}</StatusMessage>
       <button className="login-submit" type="submit" disabled={busy}>{busy ? <><LoaderCircle className="login-spinner" size={19}/> Signing in...</> : 'Login'}</button>
     </form>
-    {mode === 'login' && <div className="signup-prompt">Don't have an account? <span className="text-action">Contact your hospital administrator</span></div>}
+    {mode === 'login' && <div className="signup-prompt">Don't have an account? <span className="text-action">Contact your administrator</span></div>}
     {mode === 'login' && <div className="social-login" aria-label="Other sign-in providers">
       <button type="button" onClick={() => socialNotice('Google')} aria-label="Continue with Google"><Chrome size={25}/></button>
       <button type="button" onClick={() => socialNotice('Facebook')} aria-label="Continue with Facebook"><Facebook size={23} fill="currentColor"/></button>
