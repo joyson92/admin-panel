@@ -94,8 +94,33 @@ Resources:
           NumberAttributeConstraints:
             MinValue: "1"
 
+      LambdaConfig:
+        PreTokenGenerationConfig:
+          LambdaArn: !GetAtt TAPreTokenGenerationFunction.Arn
+          LambdaVersion: V2_0
+
       UserPoolTags:
         Application: TA
+
+  TAPreTokenGenerationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ta-pre-token-generation
+      CodeUri: pre-token-generation/
+      Handler: app.handler
+      Runtime: python3.13
+      MemorySize: 128
+      Timeout: 5
+      Policies:
+        - AWSLambdaBasicExecutionRole
+
+  TAPreTokenGenerationPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt TAPreTokenGenerationFunction.Arn
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt TAUserPool.Arn
 
   TAAdminGroup:
     Type: AWS::Cognito::UserPoolGroup

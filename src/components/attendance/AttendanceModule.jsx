@@ -93,18 +93,22 @@ export default function AttendanceModule({ view }) {
     [rows, search]
   );
 
-  const openPunchEditor = row => {
-    const existing = Number(row.check_in_count || 0) > 0;
-    const defaultTime = existing && row.first_check_in
-      ? toDateTimeLocal(row.first_check_in)
-      : `${date}T09:00`;
+  const openPunchEditor = (row, punchType) => {
+    const count = Number(row.check_in_count || 0);
+    const isFirst = punchType === 'first';
+    const attendanceId = isFirst ? row.first_check_in_id : (count > 1 ? row.last_check_in_id : null);
+    const existingTime = isFirst ? row.first_check_in : row.last_check_in;
+    const isEdit = Boolean(attendanceId);
     setPunchTarget({
       userId: row.user_id,
-      attendanceId: existing ? row.first_check_in_id : null,
+      attendanceId: isEdit ? attendanceId : null,
       employeeName: row.name,
-      mode: existing ? 'edit' : 'add'
+      punchType,
+      mode: isEdit ? 'edit' : 'add'
     });
-    setPunchDateTime(defaultTime);
+    setPunchDateTime(isEdit && existingTime && existingTime !== '-'
+      ? toDateTimeLocal(existingTime)
+      : `${date}T${isFirst ? '09:00' : getCurrentISTDateTime().slice(11, 16)}`);
     setError('');
     setNotice('');
   };
@@ -116,12 +120,13 @@ export default function AttendanceModule({ view }) {
     setError('');
     try {
       const payload = { check_in_time: punchDateTime };
+      const label = punchTarget.punchType === 'first' ? 'First punch' : 'Last punch';
       if (punchTarget.mode === 'edit') {
         await updateAdminPunch(punchTarget.attendanceId, payload);
-        setNotice(`Punch-in updated for ${punchTarget.employeeName}.`);
+        setNotice(`${label} updated for ${punchTarget.employeeName}.`);
       } else {
         await addAdminPunch({ ...payload, user_id: punchTarget.userId });
-        setNotice(`Punch-in added for ${punchTarget.employeeName}.`);
+        setNotice(`${label} added for ${punchTarget.employeeName}.`);
       }
       setPunchTarget(null);
       await load();
@@ -138,7 +143,7 @@ export default function AttendanceModule({ view }) {
         ...sheet.map(person => [person.name, person.email, ...Array.from({ length: sheetDays }, (_, i) => person.days?.[`${month}-${String(i + 1).padStart(2, '0')}`]?.status || '')])]
       : view === 'employee'
         ? [['Date', 'Check-in', 'Location', 'Confidence'], ...filtered.map(r => [dt(r.check_in_time), tm(r.check_in_time), r.location || '', r.confidence ?? ''])]
-        : [['Employee', 'Email', 'First check-in', 'Last check-in', 'Events', 'Status'], ...filtered.map(r => [r.name, r.email, tm(r.first_check_in), tm(r.last_check_in), r.check_in_count, r.status])];
+        : [['Employee', 'Time Difference', 'First check-in', 'Last check-in', 'Events', 'Status'], ...filtered.map(r => [r.name, r.time_difference, tm(r.first_check_in), tm(r.last_check_in), r.check_in_count, r.status])];
 
     const csv = data.map(row => row.map(value => `"${String(value ?? '').replaceAll('"', '""')}"`).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
@@ -177,16 +182,25 @@ export default function AttendanceModule({ view }) {
       {loading ? <div className="attendance-module-empty">Loading attendance...</div> : view === 'today' ? (
         <div className="attendance-module-table-wrap">
           <table className="attendance-module-table">
-            <thead><tr><th>Employee</th><th>Email</th><th>First check-in</th><th>Last check-in</th><th>Events</th><th>Status</th><th>Admin action</th></tr></thead>
+            <thead><tr><th>Employee</th><th>Time difference</th><th>First check-in</th><th>Last check-in</th><th>Events</th><th>Status</th><th>Admin action</th></tr></thead>
             <tbody>
               {filtered.map(row => (
                 <tr key={row.user_id}>
-                  <td>{row.name}</td><td>{row.email}</td>
+                  <td>{row.name}</td><td>{row.time_difference}</td>
                   <td>{tm(row.first_check_in)}</td><td>{tm(row.last_check_in)}</td><td>{row.check_in_count}</td>
                   <td><span className={`attendance-module-status ${(row.status || 'Absent').toLowerCase()}`}>{row.status || 'Absent'}</span></td>
-                  <td><button type="button" className="attendance-punch-action" onClick={() => openPunchEditor(row)}>
-                    <Clock3 size={15} />{Number(row.check_in_count || 0) > 0 ? 'Edit First Punch' : 'Add Punch'}
-                  </button></td>
+                  <td>
+                    <div className="attendance-punch-actions">
+                      <button type="button" className="attendance-punch-action" onClick={() => openPunchEditor(row, 'first')}>
+                        <Clock3 size={15} />{row.first_check_in_id ? 'Edit First Punch' : 'Add First Punch'}
+                      </button>
+                      {Number(row.check_in_count || 0) > 0 && (
+                        <button type="button" className="attendance-punch-action" onClick={() => openPunchEditor(row, 'last')}>
+                          <Clock3 size={15} />{row.last_check_in_id ? 'Edit Last Punch' : 'Add Last Punch'}
+                        </button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
               {!filtered.length && <tr><td colSpan="7" className="attendance-module-empty">No attendance records for this date.</td></tr>}
@@ -231,15 +245,15 @@ export default function AttendanceModule({ view }) {
 
       {punchTarget && <div className="attendance-punch-backdrop" onMouseDown={event => { if (event.target === event.currentTarget && !savingPunch) setPunchTarget(null); }}>
         <section className="attendance-punch-modal" role="dialog" aria-modal="true" aria-labelledby="attendance-punch-title">
-          <header><div><h3 id="attendance-punch-title">{punchTarget.mode === 'edit' ? 'Edit punch-in' : 'Add missed punch-in'}</h3><p>{punchTarget.employeeName}</p></div><button type="button" aria-label="Close" onClick={() => setPunchTarget(null)} disabled={savingPunch}><X size={21} /></button></header>
+          <header><div><h3 id="attendance-punch-title">{punchTarget.mode === 'edit' ? `Edit ${punchTarget.punchType} punch-in` : `Add ${punchTarget.punchType} punch-in`}</h3><p>{punchTarget.employeeName}</p></div><button type="button" aria-label="Close" onClick={() => setPunchTarget(null)} disabled={savingPunch}><X size={21} /></button></header>
           <form onSubmit={savePunch}>
-            <label>Check-in date and time
+            <label>{punchTarget.punchType === 'first' ? 'First check-in date and time' : 'Last check-in date and time'}
               <input type="datetime-local" value={punchDateTime} max={getCurrentISTDateTime()} onChange={event => setPunchDateTime(event.target.value)} required />
             </label>
-            <p className="attendance-punch-help">Enter the actual punch-in time in Indian Standard Time. Past times are allowed; future times are not.</p>
+            <p className="attendance-punch-help">Enter the actual ${punchTarget.punchType} punch-in time in Indian Standard Time. Past times are allowed; future times are not.</p>
             <div className="attendance-punch-modal-actions">
               <button type="button" className="attendance-punch-cancel" onClick={() => setPunchTarget(null)} disabled={savingPunch}>Cancel</button>
-              <button type="submit" className="attendance-punch-save" disabled={savingPunch || !punchDateTime}>{savingPunch ? 'Saving…' : 'Save punch-in'}</button>
+              <button type="submit" className="attendance-punch-save" disabled={savingPunch || !punchDateTime}>{savingPunch ? 'Saving…' : `Save ${punchTarget.punchType} punch-in`}</button>
             </div>
           </form>
         </section>

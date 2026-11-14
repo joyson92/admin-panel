@@ -60,6 +60,19 @@ def is_admin(event):
     return any(str(group).strip().strip("'\"[] ").upper() == 'ADMIN' for group in raw)
 
 
+def tenant_company_id(event):
+    # This claim is injected by Cognito Pre Token Generation V2 and validated
+    # by API Gateway's JWT authorizer. Never accept tenant IDs from payloads.
+    raw = claims(event).get('company_id')
+    try:
+        value = int(raw)
+        if value < 1:
+            raise ValueError
+        return value
+    except (TypeError, ValueError):
+        raise PermissionError('Authenticated user has no valid company_id claim')
+    
+
 def parse_body(event):
     try:
         return json.loads(event.get('body') or '{}')
@@ -74,7 +87,10 @@ def handler(event, context):
     method = event.get('requestContext', {}).get('http', {}).get('method', 'GET').upper()
     path_params = event.get('pathParameters') or {}
     staff_id = path_params.get('id')
-    company_id = int(os.environ.get('STAFF_COMPANY_ID', '1'))
+    try:
+        company_id = tenant_company_id(event)
+    except PermissionError as exc:
+        return response(403, {'message': str(exc)})
 
     try:
         with connect() as conn:

@@ -19,8 +19,24 @@ def _response(status, data):
         raise TypeError(type(v).__name__)
     return {"statusCode": status, "headers": {"content-type":"application/json","cache-control":"no-store"}, "body": json.dumps(data, default=default)}
 
+def _claims(event):
+    return event.get("requestContext", {}).get("authorizer", {}).get("jwt", {}).get("claims", {})
+
+
+def _tenant_company_id(event):
+    # Injected by Cognito Pre Token Generation V2; do not trust request data.
+    raw = _claims(event).get("company_id")
+    try:
+        value = int(raw)
+        if value < 1:
+            raise ValueError
+        return value
+    except (TypeError, ValueError):
+        raise PermissionError("Authenticated user has no valid company_id claim")
+
+
 def _admin(event):
-    claims = event.get("requestContext",{}).get("authorizer",{}).get("jwt",{}).get("claims",{})
+    claims = _claims(event)
     raw = claims.get("cognito:groups", [])
     if isinstance(raw, str):
         try: raw = json.loads(raw)
@@ -44,7 +60,10 @@ def handler(event, context):
     path=event.get("rawPath","")
     q=event.get("queryStringParameters") or {}
     pp=event.get("pathParameters") or {}
-    company=int(os.environ.get("ATTENDANCE_COMPANY_ID","1"))
+    try:
+        company = _tenant_company_id(event)
+    except PermissionError as exc:
+        return _response(403, {"message": str(exc)})
     today=datetime.now(ZoneInfo("Asia/Kolkata")).date()
     try:
         with _connect() as conn:
@@ -52,7 +71,7 @@ def handler(event, context):
                 if method=="GET" and path=="/attendance/today":
                     day=_date(q.get("date"),today)
                     start_utc,end_utc=_ist_day_bounds(day)
-                    cur.execute("""SELECT u.id user_id,u.name,u.email, (SELECT a1.id FROM ta_attendance a1 WHERE a1.users_id=u.id AND a1.check_in_time >= %s AND a1.check_in_time < %s ORDER BY a1.check_in_time ASC,a1.id ASC LIMIT 1) AS first_check_in_id, DATE_ADD(MIN(a.check_in_time), INTERVAL 330 MINUTE) first_check_in, CASE WHEN COUNT(a.id) > 1 THEN DATE_ADD(MAX(a.check_in_time), INTERVAL 330 MINUTE) ELSE '-' END AS last_check_in, COUNT(a.id) check_in_count, CASE WHEN COUNT(a.id)>0 THEN 'Present' ELSE 'Absent' END status FROM ta_users u LEFT JOIN ta_attendance a ON a.users_id=u.id AND a.check_in_time >= %s AND a.check_in_time < %s WHERE u.company_id=%s AND u.active=0 GROUP BY u.id,u.name,u.email ORDER BY u.name""",(start_utc,end_utc,start_utc,end_utc,company))
+                    cur.execute("""SELECT u.id user_id,u.name,u.email, (SELECT a1.id FROM ta_attendance a1 WHERE a1.users_id=u.id AND a1.check_in_time >= %s AND a1.check_in_time < %s ORDER BY a1.check_in_time ASC,a1.id ASC LIMIT 1) AS first_check_in_id, CASE WHEN COUNT(a.id) > 1 THEN (SELECT a2.id FROM ta_attendance a2 WHERE a2.users_id=u.id AND a2.check_in_time >= %s AND a2.check_in_time < %s ORDER BY a2.check_in_time DESC,a2.id DESC LIMIT 1) ELSE NULL END AS last_check_in_id, DATE_ADD(MIN(a.check_in_time), INTERVAL 330 MINUTE) first_check_in, CASE WHEN COUNT(a.id) > 1 THEN DATE_ADD(MAX(a.check_in_time), INTERVAL 330 MINUTE) ELSE '-' END AS last_check_in, COUNT(a.id) check_in_count, CASE WHEN COUNT(a.id)>0 THEN 'Present' ELSE 'Absent' END status, CASE WHEN COUNT(a.id) >= 2 THEN CONCAT(FLOOR(TIMESTAMPDIFF(MINUTE, MIN(a.check_in_time), MAX(a.check_in_time)) / 60),'h ',MOD(TIMESTAMPDIFF(MINUTE, MIN(a.check_in_time), MAX(a.check_in_time)), 60),'m')ELSE '-' END AS time_difference FROM ta_users u LEFT JOIN ta_attendance a ON a.users_id=u.id AND a.check_in_time >= %s AND a.check_in_time < %s WHERE u.company_id=%s AND u.active=0 GROUP BY u.id,u.name,u.email ORDER BY u.name""",(start_utc,end_utc,start_utc,end_utc,start_utc,end_utc,company))
                     return _response(200,{"date":day.isoformat(),"items":cur.fetchall()})
 
                 if method=="POST" and path=="/attendance/admin/punch":
@@ -78,7 +97,7 @@ def handler(event, context):
                         return _response(404,{"message":"Active employee not found"})
                     cur.execute("INSERT INTO ta_attendance (users_id, check_in_time) VALUES (%s,%s)",(user_id,check_in_utc))
                     conn.commit()
-                    return _response(201,{"message":"Punch-in added successfully","id":cur.lastrowid})
+                    return _response(201,{"message":"Attendance punch added successfully","id":cur.lastrowid})
 
                 if method=="PUT" and path.startswith("/attendance/admin/punch/"):
                     attendance_id=_positive_int(pp.get("id") or path.rsplit("/",1)[-1],"attendance_id")
@@ -89,7 +108,7 @@ def handler(event, context):
                         return _response(404,{"message":"Attendance punch not found"})
                     cur.execute("UPDATE ta_attendance SET check_in_time=%s WHERE id=%s",(check_in_utc,attendance_id))
                     conn.commit()
-                    return _response(200,{"message":"Punch-in updated successfully","id":attendance_id})
+                    return _response(200,{"message":"Attendance punch updated successfully","id":attendance_id})
                 if method=="GET" and path.startswith("/attendance/employees/"):
                     uid=pp.get("id") or path.rsplit("/",1)[-1]
                     start=_date(q.get("start_date"),today.replace(day=1)); end=_date(q.get("end_date"),today)
